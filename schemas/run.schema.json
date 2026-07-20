@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/run-directory-1.json",
+  "title": "Akrion canonical run directory descriptor",
+  "description": "A logical descriptor for the six files in a canonical run directory. Live recordings are directories, not single JSON documents or ZIP files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "manifest", "config", "serial_raw", "frames", "events", "summary"],
+  "properties": {
+    "schema": { "const": "akrion.run/1" },
+    "manifest": { "$ref": "manifest.schema.json" },
+    "config": { "$ref": "config.schema.json" },
+    "serial_raw": { "type": "string", "contentEncoding": "base64" },
+    "frames": {
+      "type": "array",
+      "items": { "$ref": "serial-frame.schema.json" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "event.schema.json" }
+    },
+    "summary": { "$ref": "summary.schema.json" }
+  },
+  "x-canonical-files": [
+    "manifest.json",
+    "config.json",
+    "serial.raw",
+    "frames.ndjson",
+    "events.ndjson",
+    "summary.json"
+  ]
+}

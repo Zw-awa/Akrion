@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/summary-1.json",
+  "title": "Akrion factual run summary",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "status"],
+  "properties": {
+    "schema": { "const": "akrion.summary/1" },
+    "status": { "enum": ["recording", "completed", "interrupted", "recovered"] },
+    "transport": { "type": "object" },
+    "channels": { "type": "object" },
+    "metrics": { "type": "object" },
+    "algorithms": { "type": "object" }
+  }
+}

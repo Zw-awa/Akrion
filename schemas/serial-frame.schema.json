@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/serial-frame-1.json",
+  "title": "Akrion structured serial frame",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema",
+    "device_time_us",
+    "algo_tick",
+    "emit_tick",
+    "seq",
+    "algo_id",
+    "algo_enabled",
+    "values"
+  ],
+  "properties": {
+    "schema": { "const": "akrion.frame/1" },
+    "device_time_us": { "type": "integer", "minimum": 0 },
+    "host_receive_time_us": { "type": "integer", "minimum": 0 },
+    "algo_tick": { "type": "integer", "minimum": 0 },
+    "emit_tick": { "type": "integer", "minimum": 0 },
+    "seq": { "type": "integer", "minimum": 0 },
+    "algo_id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "algo_enabled": { "type": "boolean" },
+    "values": {
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": { "type": "number" }
+    }
+  }
+}

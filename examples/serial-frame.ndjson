@@ -1,0 +1,1 @@
+{"schema":"akrion.frame/1","device_time_us":20000,"algo_tick":20,"emit_tick":1,"seq":1,"algo_id":1,"algo_enabled":true,"values":{"reference":1.0,"measurement":0.82,"control":0.31,"disturbance":0.01}}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/manifest-1.json",
+  "title": "Akrion run manifest",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema", "run_id", "name", "status", "created_at", "updated_at", "source",
+    "config_signature", "experiment_signature", "algorithm_signatures",
+    "frame_count", "event_count", "raw_byte_count"
+  ],
+  "properties": {
+    "schema": { "const": "akrion.manifest/1" },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "name": { "type": "string" },
+    "status": { "enum": ["recording", "completed", "interrupted", "recovered"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string" },
+    "config_signature": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "experiment_signature": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "algorithm_signatures": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]+$" },
+      "additionalProperties": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "frame_count": { "type": "integer", "minimum": 0 },
+    "event_count": { "type": "integer", "minimum": 0 },
+    "raw_byte_count": { "type": "integer", "minimum": 0 }
+  }
+}

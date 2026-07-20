@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/config-1.json",
+  "title": "Akrion run configuration",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "name", "device_id", "serial", "timing", "channels", "algorithms", "metrics", "scenario"],
+  "properties": {
+    "schema": { "const": "akrion.config/1" },
+    "name": { "type": "string" },
+    "device_id": { "type": "string" },
+    "serial": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["port", "baud_rate", "data_bits", "parity", "stop_bits", "flow_control", "read_timeout_ms"],
+      "properties": {
+        "port": { "type": "string" },
+        "baud_rate": { "type": "integer", "minimum": 1 },
+        "data_bits": { "type": "integer", "minimum": 5, "maximum": 8 },
+        "parity": { "enum": ["none", "even", "odd", "space", "mark"] },
+        "stop_bits": { "enum": ["one", "one_and_half", "two"] },
+        "flow_control": { "enum": ["none", "hardware", "software"] },
+        "read_timeout_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["algorithm_period_us", "emit_period_us", "max_deviation_us"],
+      "properties": {
+        "algorithm_period_us": { "type": "integer", "minimum": 1 },
+        "emit_period_us": { "type": "integer", "minimum": 1 },
+        "max_deviation_us": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["key", "label", "unit", "role", "description"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "unit": { "type": "string" },
+          "role": { "enum": ["reference", "input", "measurement", "output", "control", "disturbance", "estimate", "state", "diagnostic", "other"] },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "algorithms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "display_name", "implementation_language", "parameters"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "display_name": { "type": "string", "minLength": 1 },
+          "implementation_language": { "enum": ["c", "cpp", "rust", "other"] },
+          "repository": { "type": "string" },
+          "source_reference": { "type": "string" },
+          "revision": { "type": "string" },
+          "build_hash": { "type": "string" },
+          "author": { "type": "string" },
+          "organization": { "type": "string" },
+          "license": { "type": "string" },
+          "parameters": { "type": "object" }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "reference", "observed"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "reference": { "type": "string", "minLength": 1 },
+          "observed": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "scenario": { "type": "object" }
+  }
+}

@@ -1,0 +1,12 @@
+.env
+.env.local
+!.env.example
+runs/
+build*/
+dist/
+opensource/
+docs/private/
+.DS_Store
+Thumbs.db
+
+

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://akrion.dev/schema/event-1.json",
+  "title": "Akrion run event",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "type", "severity", "message", "host_time_us", "details"],
+  "properties": {
+    "schema": { "const": "akrion.event/1" },
+    "type": { "type": "string", "minLength": 1 },
+    "severity": { "enum": ["info", "warning", "error"] },
+    "message": { "type": "string" },
+    "host_time_us": { "type": "integer", "minimum": 0 },
+    "device_time_us": { "type": "integer", "minimum": 0 },
+    "seq": { "type": "integer", "minimum": 0 },
+    "details": { "type": "object" }
+  }
+}
