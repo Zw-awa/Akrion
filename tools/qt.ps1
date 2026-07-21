@@ -196,12 +196,13 @@ function Smoke-TestQt {
 
 function Deploy-Qt {
     Set-QtEnvironment
-    Assert-Built
-    Assert-Tool $deployExe "windeployqt"
-
     if ($useAgentSafe) {
         throw "Qt deployment is unavailable in the restricted agent environment. Run tools/qt.ps1 deploy from a normal PowerShell terminal."
     }
+
+    # Always rebuild the selected local kit so deploy cannot package a stale build tree.
+    Build-Qt
+    Assert-Tool $deployExe "windeployqt"
 
     $distRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "dist"))
     $distDir = [IO.Path]::GetFullPath((Join-Path $distRoot "Akrion"))
