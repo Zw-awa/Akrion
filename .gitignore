@@ -6,6 +6,7 @@ build*/
 dist/
 opensource/
 docs/private/
+sdk/rust/**/target/
 .DS_Store
 Thumbs.db
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Akrion VERSION 0.2.0 LANGUAGES CXX)
+project(Akrion VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -34,6 +34,12 @@ set(AKRION_CORE_SOURCES
     src/core/run_storage.h
     src/core/data_source.cpp
     src/core/data_source.h
+    src/core/component_registry.cpp
+    src/core/component_registry.h
+    src/core/component_pipeline.cpp
+    src/core/component_pipeline.h
+    src/core/builtin_components.cpp
+    src/core/builtin_components.h
     src/core/capture_session.cpp
     src/core/capture_session.h
     src/package/runpackage.cpp
@@ -42,7 +48,9 @@ set(AKRION_CORE_SOURCES
 
 qt_add_library(akrion-core STATIC ${AKRION_CORE_SOURCES})
 set_target_properties(akrion-core PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
-target_include_directories(akrion-core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(akrion-core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(akrion-core PUBLIC Qt6::Core Qt6::SerialPort)
 
 qt_add_executable(akrion src/cli/main.cpp)
@@ -113,6 +121,25 @@ if(BUILD_TESTING)
         )
     endif()
 
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/component_tests.cpp")
+        add_executable(akrion-component-tests tests/component_tests.cpp)
+        set_target_properties(akrion-component-tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+        target_link_libraries(akrion-component-tests PRIVATE akrion-core Qt6::Core)
+        add_test(NAME akrion-component-tests COMMAND akrion-component-tests)
+        set_tests_properties(akrion-component-tests PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/component_c_abi_tests.c")
+        add_executable(akrion-component-c-abi-tests tests/component_c_abi_tests.c)
+        set_target_properties(akrion-component-c-abi-tests PROPERTIES
+            AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+        target_include_directories(akrion-component-c-abi-tests PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include")
+        add_test(NAME akrion-component-c-abi-tests COMMAND akrion-component-c-abi-tests)
+    endif()
+
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/waveform_tests.cpp")
         add_executable(akrion-waveform-tests
             tests/waveform_tests.cpp
@@ -142,3 +169,4 @@ install(TARGETS akrion akrion-gui
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

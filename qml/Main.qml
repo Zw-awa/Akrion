@@ -193,7 +193,11 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 76
                         placeholderText: "算法参数 JSON"
-                        text: appController.demo && algorithmSelector.currentValue === "p_control" ? '{"kp":1.2}' : '{}'
+                        text: !appController.demo ? '{}'
+                              : algorithmSelector.currentValue === "p_control" ? '{"kp":1.2}'
+                              : algorithmSelector.currentValue === "pid" ? '{"kp":1.2,"ki":0.08,"kd":0.02}'
+                              : algorithmSelector.currentValue === "median_filter" ? '{"window":5}'
+                              : '{}'
                         wrapMode: TextEdit.WrapAnywhere
                         font.family: "Consolas"
                         font.pixelSize: 10

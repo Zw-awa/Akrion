@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../core/frame_decoder.h"
+#include "../core/component_registry.h"
+#include "../core/component_pipeline.h"
 #include "../core/frame_validator.h"
 #include "../core/run_storage.h"
 #include "../core/statistics.h"
@@ -110,7 +112,9 @@ private:
     std::unique_ptr<core::FrameValidator> m_validator;
     std::unique_ptr<core::RunStatistics> m_statistics;
     std::unique_ptr<core::RunWriter> m_writer;
+    std::unique_ptr<core::ComponentPipeline> m_demoPipeline;
     core::RunStore m_store;
+    core::ComponentRegistry m_componentRegistry;
     QStringList m_ports;
     QVariantList m_history;
     QString m_statusMessage;
@@ -123,8 +127,6 @@ private:
     QString m_demoInputComponent = QStringLiteral("step");
     QString m_demoNoiseComponent = QStringLiteral("gaussian");
     QString m_demoAlgorithmComponent = QStringLiteral("p_control");
-    QRandomGenerator64 m_demoRandom {1};
-    double m_demoState = 0.0;
 };
 
 } // namespace akrion::gui

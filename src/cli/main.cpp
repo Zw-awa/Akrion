@@ -1,5 +1,7 @@
 #include "../core/frame_decoder.h"
 #include "../core/frame_validator.h"
+#include "../core/component_pipeline.h"
+#include "../core/component_registry.h"
 #include "../core/run_storage.h"
 #include "../core/statistics.h"
 #include "../core/types.h"
@@ -107,7 +109,48 @@ int fail(CliContext& context, int exitCode, const QString& message,
     return exitCode;
 }
 
-void succeed(CliContext& context, const QJsonValue& data, const QString& human = {}) {
+void succeed(CliContext& context, const QJsonValue& data, const QString& human = {});
+
+QString componentKindName(uint32_t kind) {
+    if (kind == AKRION_COMPONENT_INPUT) return QStringLiteral("input");
+    if (kind == AKRION_COMPONENT_NOISE) return QStringLiteral("noise");
+    return QStringLiteral("algorithm");
+}
+
+int commandComponents(CliContext& context) {
+    const ComponentRegistry registry = ComponentRegistry::withBuiltins();
+    QJsonArray components;
+    for (const auto* descriptor : registry.all()) {
+        QJsonArray inputs;
+        for (size_t index = 0; index < descriptor->input_count; ++index)
+            inputs.append(QString::fromUtf8(descriptor->inputs[index].key));
+        QJsonArray outputs;
+        for (size_t index = 0; index < descriptor->output_count; ++index)
+            outputs.append(QString::fromUtf8(descriptor->outputs[index].key));
+        components.append(QJsonObject{
+            {QStringLiteral("id"), QString::fromUtf8(descriptor->id)},
+            {QStringLiteral("name"), QString::fromUtf8(descriptor->name)},
+            {QStringLiteral("version"), QString::fromUtf8(descriptor->version)},
+            {QStringLiteral("kind"), componentKindName(descriptor->kind)},
+            {QStringLiteral("inputs"), inputs},
+            {QStringLiteral("outputs"), outputs},
+        });
+    }
+    if (context.json) {
+        succeed(context, QJsonObject{{QStringLiteral("components"), components}});
+    } else {
+        for (const auto& value : components) {
+            const auto object = value.toObject();
+            context.out << object.value(QStringLiteral("kind")).toString() << "\t"
+                        << object.value(QStringLiteral("id")).toString() << "\t"
+                        << object.value(QStringLiteral("version")).toString() << "\t"
+                        << object.value(QStringLiteral("name")).toString() << Qt::endl;
+        }
+    }
+    return 0;
+}
+
+void succeed(CliContext& context, const QJsonValue& data, const QString& human) {
     if (context.json) writeJsonLine(context.out, resultEnvelope(context, true, data));
     else if (!human.isEmpty()) context.out << human << Qt::endl;
 }
@@ -146,6 +189,8 @@ RunConfig defaultConfig() {
          ChannelRole::Control, QStringLiteral("Algorithm output"), {}},
         {QStringLiteral("noise"), QStringLiteral("Noise"), QString(),
          ChannelRole::Disturbance, QStringLiteral("Injected demo disturbance"), {}},
+        {QStringLiteral("error"), QStringLiteral("Error"), QString(),
+         ChannelRole::Diagnostic, QStringLiteral("Reference minus measurement"), {}},
     };
     AlgorithmDefinition algorithm;
     algorithm.id = 1;
@@ -163,13 +208,24 @@ RunConfig defaultConfig() {
                        QStringLiteral("actual"), {}}};
     config.scenario = {
         {QStringLiteral("input"),
-         QJsonObject{{QStringLiteral("type"), QStringLiteral("step")},
-                     {QStringLiteral("initial"), 0.0},
-                     {QStringLiteral("value"), 1.0},
-                     {QStringLiteral("at_s"), 2.0}}},
+         QJsonObject{{QStringLiteral("component"), QStringLiteral("step")},
+                     {QStringLiteral("version"), QStringLiteral("1.0.0")},
+                     {QStringLiteral("parameters"), QJsonObject{
+                         {QStringLiteral("profile"), QStringLiteral("step")},
+                         {QStringLiteral("offset"), 0.0},
+                         {QStringLiteral("amplitude"), 1.0},
+                         {QStringLiteral("step_at_s"), 2.0}}}}},
         {QStringLiteral("noise"),
-         QJsonObject{{QStringLiteral("type"), QStringLiteral("gaussian")},
-                     {QStringLiteral("standard_deviation"), 0.02}}},
+         QJsonObject{{QStringLiteral("component"), QStringLiteral("gaussian")},
+                     {QStringLiteral("version"), QStringLiteral("1.0.0")},
+                     {QStringLiteral("parameters"), QJsonObject{
+                         {QStringLiteral("profile"), QStringLiteral("gaussian")},
+                         {QStringLiteral("amplitude"), 0.02},
+                         {QStringLiteral("seed"), 1}}}}},
+        {QStringLiteral("algorithm"),
+         QJsonObject{{QStringLiteral("component"), QStringLiteral("p_control")},
+                     {QStringLiteral("version"), QStringLiteral("1.0.0")},
+                     {QStringLiteral("parameters"), algorithm.parameters}}},
         {QStringLiteral("seed"), 1},
     };
     return config;
@@ -900,6 +956,11 @@ int commandDemo(CliContext& context, const QCommandLineParser& parser) {
         if (!ok) return fail(context, kCliError, QStringLiteral("invalid --seed value"));
         seed = value;
         config.scenario.insert(QStringLiteral("seed"), static_cast<qint64>(seed));
+        auto noise = config.scenario.value(QStringLiteral("noise")).toObject();
+        auto noiseParameters = noise.value(QStringLiteral("parameters")).toObject();
+        noiseParameters.insert(QStringLiteral("seed"), static_cast<qint64>(seed));
+        noise.insert(QStringLiteral("parameters"), noiseParameters);
+        config.scenario.insert(QStringLiteral("noise"), noise);
     }
     announceDuplicate(context, config);
     CapturePipeline pipeline(config);
@@ -908,40 +969,21 @@ int commandDemo(CliContext& context, const QCommandLineParser& parser) {
     options.source = QStringLiteral("demo");
     if (!pipeline.start(options, &error)) return fail(context, kIoError, error);
     emitCaptureStarted(context, pipeline, QStringLiteral("demo"));
-
-    const auto input = config.scenario.value(QStringLiteral("input")).toObject();
-    const auto noise = config.scenario.value(QStringLiteral("noise")).toObject();
+    ComponentPipeline componentPipeline(config);
+    if (!componentPipeline.open(&error))
+        return finishCapture(context, &pipeline, RunStatus::Interrupted, kCliError, error);
     const quint64 periodUs = config.timing.emitPeriodUs;
-    const auto algorithmId = config.algorithms.isEmpty() ? 0u : config.algorithms.first().id;
-    QRandomGenerator random(seed);
     QElapsedTimer hostClock;
     QElapsedTimer progress;
     const auto hostEpochUs = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
     hostClock.start();
     progress.start();
     quint64 sequence = 0;
-    double plant = 0.0;
     const auto totalFrames = static_cast<quint64>(*duration * 1000000.0 / periodUs);
     while (sequence < totalFrames && !g_interrupted.load()) {
-        const quint64 deviceTimeUs = sequence * periodUs;
-        const auto timeSeconds = deviceTimeUs / 1000000.0;
-        const auto target = profileValue(input, timeSeconds, *duration);
-        const auto disturbance = noiseValue(noise, &random);
-        const auto alpha = qMin(1.0, periodUs / 180000.0);
-        plant += (target - plant) * alpha;
-        const auto actual = plant + disturbance;
-        const auto control = qBound(-1.0, (target - actual) * 1.7, 1.0);
         Frame frame;
-        frame.deviceTimeUs = deviceTimeUs;
-        frame.algoTick = deviceTimeUs / config.timing.algorithmPeriodUs;
-        frame.emitTick = sequence;
-        frame.seq = sequence;
-        frame.algoId = algorithmId;
-        frame.algoEnabled = true;
-        frame.values = {{QStringLiteral("target"), target},
-                        {QStringLiteral("actual"), actual},
-                        {QStringLiteral("control"), control},
-                        {QStringLiteral("noise"), disturbance}};
+        if (!componentPipeline.nextFrame(sequence, &frame, &error))
+            return finishCapture(context, &pipeline, RunStatus::Interrupted, kCliError, error);
         auto bytes = QJsonDocument(toJson(frame)).toJson(QJsonDocument::Compact);
         bytes.append('\n');
         if (!pipeline.ingest(bytes,
@@ -974,7 +1016,7 @@ int main(int argc, char* argv[]) {
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral(
         "Real-device experiment recorder and replay tool\n\n"
-        "Commands: doctor, ports, init, record, demo, validate, runs list, "
+        "Commands: doctor, ports, components, init, record, demo, validate, runs list, "
         "runs show, replay, export, pack, unpack"));
     parser.addHelpOption();
     parser.addVersionOption();
@@ -1019,6 +1061,7 @@ int main(int argc, char* argv[]) {
 
     if (command == QStringLiteral("doctor")) return commandDoctor(context);
     if (command == QStringLiteral("ports")) return commandPorts(context);
+    if (command == QStringLiteral("components")) return commandComponents(context);
     if (command == QStringLiteral("init")) return commandInit(context, parser, positional);
     if (command == QStringLiteral("record")) return commandRecord(context, parser);
     if (command == QStringLiteral("demo")) return commandDemo(context, parser);

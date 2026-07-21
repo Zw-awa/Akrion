@@ -131,6 +131,7 @@ The desktop application is intended for real-device debugging: connect a serial 
 The CLI includes:
 
 - `doctor`, `ports`, `init`, `record`, and `demo`
+- `components` to list available input, noise, and algorithm components
 - `validate`, `runs list`, `runs show`, and `replay`
 - `export`, `pack`, and `unpack`
 - machine-readable `--json` output and distinct exit codes
@@ -183,6 +184,8 @@ Each capture is streamed into a crash-recoverable run directory:
 `serial.raw` preserves the exact received bytes. Completed runs can be exported as CSV/NDJSON or packed into a standard `.akrion` ZIP container.
 
 Akrion reports factual transport, timing, channel, MAE, and RMSE results only when the channel mapping is explicit. It does not recommend algorithms or infer whether an algorithm is good.
+
+The component library exposes a stable C ABI: a component receives a timestamped, channel-ID input view and writes declared outputs into a host-owned buffer. C, C++, and Rust components use the same interface; a Rust example is included in [`sdk/rust/akrion-component`](./sdk/rust/akrion-component).
 
 ## License
 

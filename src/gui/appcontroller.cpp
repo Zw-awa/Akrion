@@ -11,42 +11,58 @@
 
 namespace akrion::gui {
 
-QVariantList AppController::inputComponents() const {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("step")},
-                    {QStringLiteral("label"), QStringLiteral("阶跃")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("sine")},
-                    {QStringLiteral("label"), QStringLiteral("正弦")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("sweep")},
-                    {QStringLiteral("label"), QStringLiteral("扫频")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("constant")},
-                    {QStringLiteral("label"), QStringLiteral("常量")}},
+namespace {
+QString localizedComponentLabel(const QString& id, const QString& fallback) {
+    static const QHash<QString, QString> labels {
+        {QStringLiteral("step"), QStringLiteral("阶跃")},
+        {QStringLiteral("sine"), QStringLiteral("正弦")},
+        {QStringLiteral("sweep"), QStringLiteral("扫频")},
+        {QStringLiteral("constant"), QStringLiteral("常量")},
+        {QStringLiteral("gaussian"), QStringLiteral("高斯噪声")},
+        {QStringLiteral("uniform"), QStringLiteral("均匀噪声")},
+        {QStringLiteral("none"), QStringLiteral("无噪声")},
+        {QStringLiteral("p_control"), QStringLiteral("P 控制")},
+        {QStringLiteral("pid"), QStringLiteral("PID")},
+        {QStringLiteral("passthrough"), QStringLiteral("直通")},
+        {QStringLiteral("median_filter"), QStringLiteral("中值滤波")},
     };
+    return labels.value(id, fallback);
+}
+
+QVariantList componentList(const core::ComponentRegistry& registry, uint32_t kind) {
+    QVariantList result;
+    for (const auto* descriptor : registry.byKind(kind)) {
+        const QString id = QString::fromUtf8(descriptor->id);
+        result.append(QVariantMap{
+            {QStringLiteral("id"), id},
+            {QStringLiteral("label"), localizedComponentLabel(id, QString::fromUtf8(descriptor->name))},
+            {QStringLiteral("version"), QString::fromUtf8(descriptor->version)},
+        });
+    }
+    return result;
+}
+} // namespace
+
+QVariantList AppController::inputComponents() const {
+    return componentList(m_componentRegistry, AKRION_COMPONENT_INPUT);
 }
 
 QVariantList AppController::noiseComponents() const {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("gaussian")},
-                    {QStringLiteral("label"), QStringLiteral("高斯噪声")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("uniform")},
-                    {QStringLiteral("label"), QStringLiteral("均匀噪声")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("none")},
-                    {QStringLiteral("label"), QStringLiteral("无噪声")}},
-    };
+    return componentList(m_componentRegistry, AKRION_COMPONENT_NOISE);
 }
 
 QVariantList AppController::algorithmComponents() const {
-    return {
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("p_control")},
-                    {QStringLiteral("label"), QStringLiteral("P 控制")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("passthrough")},
-                    {QStringLiteral("label"), QStringLiteral("直通")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("disabled")},
-                    {QStringLiteral("label"), QStringLiteral("不启用算法")}},
-    };
+    QVariantList result = componentList(m_componentRegistry, AKRION_COMPONENT_ALGORITHM);
+    result.append(QVariantMap{{QStringLiteral("id"), QStringLiteral("disabled")},
+                              {QStringLiteral("label"), QStringLiteral("不启用算法")},
+                              {QStringLiteral("version"), QStringLiteral("host")}});
+    return result;
 }
 
-AppController::AppController(QObject* parent) : QObject(parent), m_store(core::RunStore::defaultRoot()) {
+AppController::AppController(QObject* parent)
+    : QObject(parent),
+      m_store(core::RunStore::defaultRoot()),
+      m_componentRegistry(core::ComponentRegistry::withBuiltins()) {
     m_config = baseConfig();
     m_validator = std::make_unique<core::FrameValidator>(m_config);
     ensureChannels(m_config);
@@ -88,6 +104,8 @@ core::RunConfig AppController::baseConfig() const {
          core::ChannelRole::Control, QStringLiteral("算法输出"), {}},
         {QStringLiteral("noise"), QStringLiteral("扰动"), QString(),
          core::ChannelRole::Disturbance, QStringLiteral("扰动或噪声"), {}},
+        {QStringLiteral("error"), QStringLiteral("误差"), QString(),
+         core::ChannelRole::Diagnostic, QStringLiteral("参考与测量的差值"), {}},
     };
     core::AlgorithmDefinition algorithm;
     algorithm.id = 1;
@@ -134,8 +152,6 @@ void AppController::resetLiveState() {
     m_framesSinceRateUpdate = 0;
     m_frameRate = 0.0;
     m_demoSequence = 0;
-    m_demoState = 0.0;
-    m_demoRandom.seed(1);
     m_hostEpochUs = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
     m_hostClock.restart();
     m_rateClock.restart();
@@ -171,18 +187,19 @@ void AppController::startDemo(
     const QString input = inputComponent.trimmed().toLower();
     const QString noise = noiseComponent.trimmed().toLower();
     const QString algorithm = algorithmComponent.trimmed().toLower();
-    if (!QStringList{QStringLiteral("step"), QStringLiteral("sine"),
-                     QStringLiteral("sweep"), QStringLiteral("constant")}.contains(input)) {
+    const auto* inputDescriptor = m_componentRegistry.find(input);
+    if (!inputDescriptor || inputDescriptor->kind != AKRION_COMPONENT_INPUT) {
         reportError(QStringLiteral("未知输入组件：%1").arg(inputComponent));
         return;
     }
-    if (!QStringList{QStringLiteral("gaussian"), QStringLiteral("uniform"),
-                     QStringLiteral("none")}.contains(noise)) {
+    const auto* noiseDescriptor = m_componentRegistry.find(noise);
+    if (!noiseDescriptor || noiseDescriptor->kind != AKRION_COMPONENT_NOISE) {
         reportError(QStringLiteral("未知噪声组件：%1").arg(noiseComponent));
         return;
     }
-    if (!QStringList{QStringLiteral("p_control"), QStringLiteral("passthrough"),
-                     QStringLiteral("disabled")}.contains(algorithm)) {
+    const auto* algorithmDescriptor = m_componentRegistry.find(algorithm);
+    if (algorithm != QStringLiteral("disabled")
+        && (!algorithmDescriptor || algorithmDescriptor->kind != AKRION_COMPONENT_ALGORITHM)) {
         reportError(QStringLiteral("未知算法组件：%1").arg(algorithmComponent));
         return;
     }
@@ -197,28 +214,54 @@ void AppController::startDemo(
         : input == QStringLiteral("sweep") ? QStringLiteral("扫频") : QStringLiteral("常量");
     const QString noiseLabel = noise == QStringLiteral("gaussian") ? QStringLiteral("高斯噪声")
         : noise == QStringLiteral("uniform") ? QStringLiteral("均匀噪声") : QStringLiteral("无噪声");
-    const QString algorithmLabel = algorithm == QStringLiteral("p_control") ? QStringLiteral("P 控制")
-        : algorithm == QStringLiteral("passthrough") ? QStringLiteral("直通")
-                                                       : QStringLiteral("不启用算法");
+    const QString algorithmLabel = algorithm == QStringLiteral("disabled")
+        ? QStringLiteral("不启用算法")
+        : localizedComponentLabel(algorithm, QString::fromUtf8(algorithmDescriptor->name));
     m_config.name = QStringLiteral("gui-demo-%1-%2-%3").arg(input, noise, algorithm);
     m_config.deviceId = QStringLiteral("demo-device");
     auto& definition = m_config.algorithms.first();
     definition.displayName = algorithmLabel;
     definition.implementationLanguage = core::ImplementationLanguage::Cpp;
     definition.sourceReference = QStringLiteral("builtin-demo");
+    definition.revision = algorithmDescriptor
+        ? QString::fromUtf8(algorithmDescriptor->version) : QStringLiteral("host");
+    definition.buildHash = QStringLiteral("builtin");
     definition.license = QStringLiteral("Apache-2.0");
     definition.parameters = algorithm == QStringLiteral("p_control")
         ? QJsonObject{{QStringLiteral("kp"), 1.2},
                       {QStringLiteral("plant_time_constant_s"), 0.25}}
+        : algorithm == QStringLiteral("pid")
+            ? QJsonObject{{QStringLiteral("kp"), 1.2},
+                          {QStringLiteral("ki"), 0.08},
+                          {QStringLiteral("kd"), 0.02}}
+        : algorithm == QStringLiteral("median_filter")
+            ? QJsonObject{{QStringLiteral("window"), 5}}
         : QJsonObject{};
     m_config.scenario = {
         {QStringLiteral("source"), QStringLiteral("demo")},
-        {QStringLiteral("input"), QJsonObject{{QStringLiteral("component"), input}}},
+        {QStringLiteral("input"), QJsonObject{
+            {QStringLiteral("component"), input},
+            {QStringLiteral("version"), QString::fromUtf8(inputDescriptor->version)},
+            {QStringLiteral("parameters"), QJsonObject{{QStringLiteral("profile"), input}}}}},
         {QStringLiteral("noise"), QJsonObject{{QStringLiteral("component"), noise},
-                                               {QStringLiteral("amplitude"), 0.02},
-                                               {QStringLiteral("seed"), 1}}},
-        {QStringLiteral("algorithm"), QJsonObject{{QStringLiteral("component"), algorithm}}},
+                                               {QStringLiteral("version"), QString::fromUtf8(noiseDescriptor->version)},
+                                               {QStringLiteral("parameters"), QJsonObject{
+                                                   {QStringLiteral("profile"), noise},
+                                                   {QStringLiteral("amplitude"), 0.02},
+                                                   {QStringLiteral("seed"), 1}}}}},
+        {QStringLiteral("algorithm"), QJsonObject{
+            {QStringLiteral("component"), algorithm},
+            {QStringLiteral("version"), algorithmDescriptor
+                ? QString::fromUtf8(algorithmDescriptor->version) : QStringLiteral("host")},
+            {QStringLiteral("parameters"), definition.parameters}}},
     };
+    m_demoPipeline = std::make_unique<core::ComponentPipeline>(m_config);
+    QString pipelineError;
+    if (!m_demoPipeline->open(&pipelineError)) {
+        m_demoPipeline.reset();
+        reportError(pipelineError);
+        return;
+    }
     m_validator = std::make_unique<core::FrameValidator>(m_config);
     m_demoTimer.setInterval(qMax(1, static_cast<int>(m_config.timing.emitPeriodUs / 1000)));
     m_demoTimer.start();
@@ -229,6 +272,7 @@ void AppController::startDemo(
 void AppController::disconnectSource() {
     const bool wasConnected = connected();
     m_demoTimer.stop();
+    m_demoPipeline.reset();
     if (m_serial.isOpen()) m_serial.close();
     if (m_decoder.bufferedBytes() > 0) {
         const auto hostTimeUs = this->hostTimeUs();
@@ -249,52 +293,14 @@ void AppController::readSerial() {
 }
 
 void AppController::emitDemoFrame() {
-    constexpr double kTwoPi = 6.28318530717958647692;
-    const auto deviceTimeUs = m_demoSequence * m_config.timing.emitPeriodUs;
-    const double t = deviceTimeUs / 1000000.0;
-    double target = 0.0;
-    if (m_demoInputComponent == QStringLiteral("constant")) {
-        target = 1.0;
-    } else if (m_demoInputComponent == QStringLiteral("sine")) {
-        target = qSin(kTwoPi * 0.35 * t);
-    } else if (m_demoInputComponent == QStringLiteral("sweep")) {
-        target = qSin(kTwoPi * (0.15 * t + 0.04 * t * t));
-    } else {
-        target = t < 2.0 ? 0.0 : 1.0;
-    }
-
-    double noise = 0.0;
-    if (m_demoNoiseComponent == QStringLiteral("uniform")) {
-        noise = (m_demoRandom.generateDouble() * 2.0 - 1.0) * 0.02;
-    } else if (m_demoNoiseComponent == QStringLiteral("gaussian")) {
-        const double first = qMax(m_demoRandom.generateDouble(), 1e-12);
-        const double second = m_demoRandom.generateDouble();
-        noise = qSqrt(-2.0 * qLn(first)) * qCos(kTwoPi * second) * 0.02;
-    }
-
-    const double dt = static_cast<double>(m_config.timing.emitPeriodUs) / 1000000.0;
-    const bool algorithmEnabled = m_demoAlgorithmComponent != QStringLiteral("disabled");
-    double control = 0.0;
-    if (m_demoAlgorithmComponent == QStringLiteral("passthrough")) {
-        control = target;
-        m_demoState = target;
-    } else if (m_demoAlgorithmComponent == QStringLiteral("p_control")) {
-        control = qBound(-1.0, (target - m_demoState) * 1.2, 1.0);
-        m_demoState += control * qBound(0.0, dt / 0.25, 1.0);
-    }
-    const double actual = m_demoState + noise;
-
+    if (!m_demoPipeline) return;
     core::Frame frame;
-    frame.deviceTimeUs = deviceTimeUs;
-    frame.algoTick = deviceTimeUs / m_config.timing.algorithmPeriodUs;
-    frame.emitTick = m_demoSequence;
-    frame.seq = m_demoSequence;
-    frame.algoId = 1;
-    frame.algoEnabled = algorithmEnabled;
-    frame.values = {{QStringLiteral("target"), target},
-                    {QStringLiteral("actual"), actual},
-                    {QStringLiteral("control"), control},
-                    {QStringLiteral("noise"), noise}};
+    QString error;
+    if (!m_demoPipeline->nextFrame(m_demoSequence, &frame, &error)) {
+        reportError(error);
+        disconnectSource();
+        return;
+    }
     auto bytes = QJsonDocument(core::toJson(frame)).toJson(QJsonDocument::Compact);
     bytes.append('\n');
     ++m_demoSequence;
@@ -453,6 +459,9 @@ bool AppController::startRecording(const QString& runName,
     m_config.algorithms.first().displayName = algorithmName.trimmed().isEmpty()
         ? QStringLiteral("Algorithm 1") : algorithmName.trimmed();
     m_config.algorithms.first().parameters = parameters;
+    auto algorithmScenario = m_config.scenario.value(QStringLiteral("algorithm")).toObject();
+    algorithmScenario.insert(QStringLiteral("parameters"), parameters);
+    m_config.scenario.insert(QStringLiteral("algorithm"), algorithmScenario);
     m_config.channels.clear();
     for (const auto& channel : m_waveform.channelDefinitions()) {
         core::ChannelDefinition definition;
