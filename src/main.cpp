@@ -39,7 +39,8 @@ int main(int argc, char* argv[]) {
             QCoreApplication::exit(window && window->grabWindow().save(screenshotPath) ? 0 : 2);
         });
     } else if (app.arguments().contains(QStringLiteral("--smoke-test"))) {
-        controller.startDemo();
+        controller.startDemo(QStringLiteral("sine"), QStringLiteral("none"),
+                             QStringLiteral("passthrough"));
         QTimer::singleShot(1500, &app, &QCoreApplication::quit);
     }
     return app.exec();

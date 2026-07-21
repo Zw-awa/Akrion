@@ -112,6 +112,29 @@ if(BUILD_TESTING)
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         )
     endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/waveform_tests.cpp")
+        add_executable(akrion-waveform-tests
+            tests/waveform_tests.cpp
+            src/gui/waveformbuffer.cpp
+            src/gui/waveformbuffer.h
+            src/gui/waveformcontroller.cpp
+            src/gui/waveformcontroller.h
+        )
+        if(QT_AGENT_SAFE_BUILD)
+            qt_wrap_cpp(_akrion_waveform_test_moc src/gui/waveformcontroller.h)
+            target_sources(akrion-waveform-tests PRIVATE ${_akrion_waveform_test_moc})
+            set_target_properties(akrion-waveform-tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+        else()
+            set_target_properties(akrion-waveform-tests PROPERTIES AUTOMOC ON AUTOUIC OFF AUTORCC OFF)
+        endif()
+        target_include_directories(akrion-waveform-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_link_libraries(akrion-waveform-tests PRIVATE Qt6::Core Qt6::Gui)
+        add_test(NAME akrion-waveform-tests COMMAND akrion-waveform-tests)
+        set_tests_properties(akrion-waveform-tests PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+    endif()
 endif()
 
 include(GNUInstallDirs)

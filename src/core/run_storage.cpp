@@ -458,6 +458,8 @@ RunValidationReport RunReader::validate(bool repairTrailingLines) {
 RunStore::RunStore(QString root) : m_root(root.isEmpty() ? defaultRoot() : std::move(root)) {}
 
 QString RunStore::defaultRoot() {
+    const QString configured = qEnvironmentVariable("AKRION_STORE").trimmed();
+    if (!configured.isEmpty()) return QDir(configured).absolutePath();
     return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
         .filePath(QStringLiteral("runs"));
 }

@@ -111,25 +111,45 @@ QSGNode* WaveformView::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         if (auto* node = rectangleNode(band, QColor(QStringLiteral("#f0f1f3")))) root->appendChildNode(node);
     }
 
+    QVector<QPointF> minorGridLines;
     QVector<QPointF> gridLines;
-    for (int index = 0; index <= 6; ++index) {
-        const qreal x = plot.left() + plot.width() * index / 6.0;
+    const QVector<double> timeTicks = WaveformController::numericTicks(
+        static_cast<double>(snapshot.startUs),
+        static_cast<double>(snapshot.endUs),
+        7);
+    for (double tick : timeTicks) {
+        const qreal x = xForTime(qRound64(tick));
         gridLines.append({ x, plot.top() });
         gridLines.append({ x, plot.bottom() });
+    }
+    for (int index = 1; index < timeTicks.size(); ++index) {
+        const qreal x = xForTime(qRound64((timeTicks[index - 1] + timeTicks[index]) * 0.5));
+        minorGridLines.append({ x, plot.top() });
+        minorGridLines.append({ x, plot.bottom() });
     }
 
     const int groupCount = qMax(1, snapshot.groups.size());
     constexpr qreal groupGap = 8.0;
     const qreal groupHeight = (plot.height() - groupGap * (groupCount - 1)) / groupCount;
-    for (int groupIndex = 0; groupIndex < groupCount; ++groupIndex) {
+    for (int groupIndex = 0; groupIndex < snapshot.groups.size(); ++groupIndex) {
+        const WaveformRenderGroup& group = snapshot.groups[groupIndex];
         const qreal top = plot.top() + groupIndex * (groupHeight + groupGap);
-        for (int line = 0; line <= 4; ++line) {
-            const qreal y = top + groupHeight * line / 4.0;
+        const double valueSpan = qMax(1e-12, group.maximum - group.minimum);
+        const QVector<double> valueTicks = WaveformController::numericTicks(group.minimum, group.maximum, 6);
+        for (double tick : valueTicks) {
+            const qreal y = top + (group.maximum - tick) / valueSpan * groupHeight;
             gridLines.append({ plot.left(), y });
             gridLines.append({ plot.right(), y });
         }
+        for (int index = 1; index < valueTicks.size(); ++index) {
+            const double tick = (valueTicks[index - 1] + valueTicks[index]) * 0.5;
+            const qreal y = top + (group.maximum - tick) / valueSpan * groupHeight;
+            minorGridLines.append({ plot.left(), y });
+            minorGridLines.append({ plot.right(), y });
+        }
     }
-    if (auto* node = lineNode(gridLines, QColor(QStringLiteral("#e6e9ed")))) root->appendChildNode(node);
+    if (auto* node = lineNode(minorGridLines, QColor(QStringLiteral("#f1f3f5")))) root->appendChildNode(node);
+    if (auto* node = lineNode(gridLines, QColor(QStringLiteral("#e1e5ea")))) root->appendChildNode(node);
 
     for (int groupIndex = 0; groupIndex < snapshot.groups.size(); ++groupIndex) {
         const WaveformRenderGroup& group = snapshot.groups[groupIndex];
@@ -188,69 +208,150 @@ QSGNode* WaveformView::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
         if (auto* node = lineNode(cursor, QColor(QStringLiteral("#24292f")), 1.0f)) {
             root->appendChildNode(node);
         }
+        if (snapshot.cursorHasPoint) {
+            for (int groupIndex = 0; groupIndex < snapshot.groups.size(); ++groupIndex) {
+                const auto& group = snapshot.groups[groupIndex];
+                if (group.key != snapshot.cursorGroupKey) continue;
+                const qreal top = plot.top() + groupIndex * (groupHeight + groupGap);
+                const double span = qMax(1e-12, group.maximum - group.minimum);
+                const qreal y = top + (group.maximum - snapshot.cursorValue) / span * groupHeight;
+                const QVector<QPointF> horizontal { { plot.left(), y }, { plot.right(), y } };
+                if (auto* node = lineNode(horizontal, QColor(QStringLiteral("#57606a")), 1.0f))
+                    root->appendChildNode(node);
+                const QColor markerColor = snapshot.cursorSnapped
+                    ? QColor(QStringLiteral("#cf222e")) : QColor(QStringLiteral("#24292f"));
+                if (auto* node = rectangleNode(QRectF(x - 3.5, y - 3.5, 7.0, 7.0), markerColor))
+                    root->appendChildNode(node);
+                break;
+            }
+        }
     }
     return root;
 }
 
 void WaveformView::mousePressEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton || !plotRect().contains(event->position())) {
+    if (event->button() != Qt::LeftButton || !m_controller) {
         event->ignore();
         return;
     }
-    m_dragging = true;
+    const QRectF plot = plotRect();
+    const bool onYAxis = event->position().y() >= plot.top()
+        && event->position().y() <= plot.bottom()
+        && event->position().x() >= 0.0
+        && event->position().x() < plot.left();
+    if (onYAxis) {
+        m_dragMode = DragMode::Vertical;
+    } else if (plot.contains(event->position())) {
+        m_dragMode = DragMode::Both;
+    } else {
+        event->ignore();
+        return;
+    }
+
+    m_dragGroupKey = groupAtY(event->position().y(), nullptr, &m_dragGroupHeight);
+    if (m_dragMode == DragMode::Vertical && m_dragGroupKey.isEmpty()) {
+        m_dragMode = DragMode::None;
+        event->ignore();
+        return;
+    }
     m_lastDragPosition = event->position();
     event->accept();
 }
 
 void WaveformView::mouseMoveEvent(QMouseEvent* event) {
-    if (!m_dragging || !m_controller) {
+    if (m_dragMode == DragMode::None || !m_controller) {
         event->ignore();
         return;
     }
-    const qreal delta = event->position().x() - m_lastDragPosition.x();
-    m_lastDragPosition = event->position();
-    if (!qFuzzyIsNull(delta)) m_controller->panBy(-delta / qMax(1.0, plotRect().width()));
+    const QPointF position = event->position();
+    const QPointF delta = position - m_lastDragPosition;
+    m_lastDragPosition = position;
+    if ((m_dragMode == DragMode::Vertical || m_dragMode == DragMode::Both)
+        && !m_dragGroupKey.isEmpty() && !qFuzzyIsNull(delta.y())) {
+        m_controller->panGroupBy(m_dragGroupKey, delta.y() / qMax(1.0, m_dragGroupHeight));
+    }
+    if (m_dragMode == DragMode::Both && !qFuzzyIsNull(delta.x())) {
+        m_controller->panBy(-delta.x() / qMax(1.0, plotRect().width()));
+    }
     event->accept();
 }
 
 void WaveformView::mouseReleaseEvent(QMouseEvent* event) {
-    if (!m_dragging || event->button() != Qt::LeftButton) {
+    if (m_dragMode == DragMode::None || event->button() != Qt::LeftButton) {
         event->ignore();
         return;
     }
-    m_dragging = false;
+    m_dragMode = DragMode::None;
+    m_dragGroupKey.clear();
+    m_dragGroupHeight = 1.0;
     event->accept();
 }
-
 void WaveformView::mouseDoubleClickEvent(QMouseEvent* event) {
-    if (!m_controller || !plotRect().contains(event->position())) {
+    if (!m_controller) {
         event->ignore();
         return;
     }
-    m_controller->setFollow(true);
+    const QRectF plot = plotRect();
+    if (event->position().y() >= plot.top() && event->position().y() <= plot.bottom()
+        && event->position().x() >= 0.0 && event->position().x() < plot.left()) {
+        double normalizedY = 0.5;
+        const QString groupKey = groupAtY(event->position().y(), &normalizedY);
+        if (groupKey.isEmpty()) {
+            event->ignore();
+            return;
+        }
+        m_controller->resetGroupRange(groupKey);
+    } else if (plot.contains(event->position())) {
+        m_controller->setFollow(true);
+    } else {
+        event->ignore();
+        return;
+    }
     event->accept();
 }
 
 void WaveformView::hoverMoveEvent(QHoverEvent* event) {
-    if (!m_controller || m_dragging || !plotRect().contains(event->position())) {
-        if (m_controller && !m_dragging) m_controller->clearCursor();
+    if (!m_controller || m_dragMode != DragMode::None || !plotRect().contains(event->position())) {
+        if (m_controller && m_dragMode == DragMode::None) m_controller->clearCursor();
         return;
     }
-    m_controller->setCursorPosition(normalizedX(event->position().x()));
+    double normalizedY = 0.5;
+    qreal groupHeight = 1.0;
+    const QString groupKey = groupAtY(event->position().y(), &normalizedY, &groupHeight);
+    m_controller->setCursorAt(normalizedX(event->position().x()), groupKey, normalizedY,
+                              plotRect().width(), groupHeight);
 }
 
 void WaveformView::hoverLeaveEvent(QHoverEvent*) {
-    if (m_controller && !m_dragging) m_controller->clearCursor();
+    if (m_controller && m_dragMode == DragMode::None) m_controller->clearCursor();
 }
 
 void WaveformView::wheelEvent(QWheelEvent* event) {
-    if (!m_controller || !plotRect().contains(event->position())) {
+    if (!m_controller) {
+        event->ignore();
+        return;
+    }
+    const QRectF plot = plotRect();
+    const bool inPlot = plot.contains(event->position());
+    const bool onYAxis = event->position().y() >= plot.top()
+        && event->position().y() <= plot.bottom()
+        && event->position().x() >= 0.0
+        && event->position().x() < plot.left();
+    if (!inPlot && !onYAxis) {
         event->ignore();
         return;
     }
     const double steps = event->angleDelta().y() / 120.0;
     if (!qFuzzyIsNull(steps)) {
-        m_controller->zoomAt(normalizedX(event->position().x()), qPow(1.25, steps));
+        const double factor = qPow(1.25, steps);
+        const bool verticalZoom = onYAxis || event->modifiers().testFlag(Qt::ControlModifier);
+        if (verticalZoom) {
+            double normalizedY = 0.5;
+            const QString groupKey = groupAtY(event->position().y(), &normalizedY);
+            if (!groupKey.isEmpty()) m_controller->zoomGroupAt(groupKey, normalizedY, factor);
+        } else {
+            m_controller->zoomAt(normalizedX(event->position().x()), factor);
+        }
     }
     event->accept();
 }
@@ -262,6 +363,29 @@ QRectF WaveformView::plotRect() const {
 double WaveformView::normalizedX(qreal x) const {
     const QRectF plot = plotRect();
     return qBound(0.0, (x - plot.left()) / qMax(1.0, plot.width()), 1.0);
+}
+
+QString WaveformView::groupAtY(qreal y, double* normalizedPosition, qreal* height) const {
+    if (!m_controller) return {};
+    const QRectF plot = plotRect();
+    if (!plot.contains(QPointF(plot.center().x(), y))) return {};
+
+    const WaveformRenderSnapshot snapshot = m_controller->renderSnapshot(1);
+    const int groupCount = snapshot.groups.size();
+    if (groupCount == 0) return {};
+    constexpr qreal groupGap = 8.0;
+    const qreal groupHeight = (plot.height() - groupGap * (groupCount - 1)) / groupCount;
+    if (groupHeight <= 0.0) return {};
+    if (height) *height = groupHeight;
+    for (int index = 0; index < groupCount; ++index) {
+        const qreal top = plot.top() + index * (groupHeight + groupGap);
+        if (y < top || y > top + groupHeight) continue;
+        if (normalizedPosition) {
+            *normalizedPosition = qBound(0.0, (y - top) / groupHeight, 1.0);
+        }
+        return snapshot.groups[index].key;
+    }
+    return {};
 }
 
 } // namespace akrion::gui

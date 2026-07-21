@@ -33,54 +33,6 @@ ApplicationWindow {
         function onErrorOccurred(message) { window.toast(message) }
     }
 
-    header: ToolBar {
-        implicitHeight: 50
-        background: Rectangle {
-            color: "#ffffff"
-            border.color: "#d8dee4"
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 14
-            anchors.rightMargin: 14
-            spacing: 10
-
-            Rectangle {
-                Layout.preferredWidth: 30
-                Layout.preferredHeight: 30
-                color: "#20262e"
-                radius: 5
-                Label {
-                    anchors.centerIn: parent
-                    text: "A"
-                    color: "#ffffff"
-                    font.bold: true
-                    font.pixelSize: 16
-                }
-            }
-            ColumnLayout {
-                spacing: 0
-                Label { text: "Akrion"; font.bold: true; font.pixelSize: 15 }
-                Label { text: "真机算法实验台"; color: "#68707c"; font.pixelSize: 10 }
-            }
-            Item { Layout.fillWidth: true }
-            Rectangle {
-                implicitWidth: 8
-                implicitHeight: 8
-                radius: 4
-                color: appController.connected ? "#1a7f37" : "#8c959f"
-            }
-            Label {
-                text: appController.connected
-                      ? (appController.demo ? "演示源" : "串口已连接")
-                      : "未连接"
-                color: "#57606a"
-                font.pixelSize: 11
-            }
-        }
-    }
-
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -92,12 +44,13 @@ ApplicationWindow {
             border.color: "#d8dee4"
 
             ScrollView {
+                id: sourceScroll
                 anchors.fill: parent
                 clip: true
 
                 ColumnLayout {
-                    width: 250
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: Math.max(0, sourceScroll.availableWidth - 24)
+                    x: 12
                     spacing: 8
 
                     Label {
@@ -106,43 +59,95 @@ ApplicationWindow {
                         font.pixelSize: 13
                         topPadding: 14
                     }
-                    RowLayout {
+                    TabBar {
+                        id: sourceMode
                         Layout.fillWidth: true
-                        ComboBox {
-                            id: portSelector
-                            Layout.fillWidth: true
-                            model: appController.ports
-                            enabled: !appController.connected
-                        }
-                        ToolButton {
-                            text: "刷新"
-                            enabled: !appController.connected
-                            onClicked: appController.refreshPorts()
-                        }
+                        currentIndex: 1
+                        enabled: !appController.connected
+                        TabButton { text: "串口" }
+                        TabButton { text: "内置演示" }
                     }
-                    ComboBox {
-                        id: baudSelector
+                    StackLayout {
                         Layout.fillWidth: true
-                        model: ["115200", "230400", "460800", "921600"]
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Button {
+                        currentIndex: sourceMode.currentIndex
+
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: appController.connected && !appController.demo ? "断开串口" : "连接串口"
-                            enabled: appController.connected || portSelector.currentText.length > 0
-                            onClicked: {
-                                if (appController.connected) appController.disconnectSource()
-                                else appController.connectSerial(portSelector.currentText,
-                                                                 Number(baudSelector.currentText))
+                            spacing: 6
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ComboBox {
+                                    id: portSelector
+                                    Layout.fillWidth: true
+                                    model: appController.ports
+                                    enabled: !appController.connected
+                                }
+                                ToolButton {
+                                    text: "刷新"
+                                    enabled: !appController.connected
+                                    onClicked: appController.refreshPorts()
+                                }
+                            }
+                            ComboBox {
+                                id: baudSelector
+                                Layout.fillWidth: true
+                                model: ["115200", "230400", "460800", "921600"]
+                            }
+                            Button {
+                                Layout.fillWidth: true
+                                text: appController.connected ? "断开串口" : "连接串口"
+                                enabled: appController.connected || portSelector.currentText.length > 0
+                                onClicked: appController.connected
+                                           ? appController.disconnectSource()
+                                           : appController.connectSerial(portSelector.currentText,
+                                                                         Number(baudSelector.currentText))
                             }
                         }
-                        Button {
+
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: appController.demo ? "停止演示" : "运行演示"
-                            onClicked: appController.demo
-                                       ? appController.disconnectSource()
-                                       : appController.startDemo()
+                            spacing: 6
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 8
+                                rowSpacing: 6
+                                enabled: !appController.connected
+
+                                Label { text: "输入"; color: "#57606a"; font.pixelSize: 11 }
+                                ComboBox {
+                                    id: inputSelector
+                                    Layout.fillWidth: true
+                                    model: appController.inputComponents
+                                    textRole: "label"
+                                    valueRole: "id"
+                                }
+                                Label { text: "噪声"; color: "#57606a"; font.pixelSize: 11 }
+                                ComboBox {
+                                    id: noiseSelector
+                                    Layout.fillWidth: true
+                                    model: appController.noiseComponents
+                                    textRole: "label"
+                                    valueRole: "id"
+                                }
+                                Label { text: "算法"; color: "#57606a"; font.pixelSize: 11 }
+                                ComboBox {
+                                    id: algorithmSelector
+                                    Layout.fillWidth: true
+                                    model: appController.algorithmComponents
+                                    textRole: "label"
+                                    valueRole: "id"
+                                }
+                            }
+                            Button {
+                                Layout.fillWidth: true
+                                text: appController.demo ? "停止演示" : "运行演示"
+                                onClicked: appController.demo
+                                           ? appController.disconnectSource()
+                                           : appController.startDemo(inputSelector.currentValue,
+                                                                     noiseSelector.currentValue,
+                                                                     algorithmSelector.currentValue)
+                            }
                         }
                     }
 
@@ -152,7 +157,7 @@ ApplicationWindow {
                         id: runName
                         Layout.fillWidth: true
                         placeholderText: "运行名称"
-                        text: appController.demo ? "demo-pid-step" : "device-run"
+                        text: appController.demo ? "demo-" + inputSelector.currentValue + "-" + noiseSelector.currentValue : "device-run"
                     }
                     TextField {
                         id: deviceId
@@ -164,7 +169,7 @@ ApplicationWindow {
                         id: algorithmName
                         Layout.fillWidth: true
                         placeholderText: "算法名称"
-                        text: appController.demo ? "Demo PID" : "PID"
+                        text: appController.demo ? algorithmSelector.currentText : "PID"
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -188,7 +193,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 76
                         placeholderText: "算法参数 JSON"
-                        text: '{"kp":1.2,"ki":0.08,"kd":0.02}'
+                        text: appController.demo && algorithmSelector.currentValue === "p_control" ? '{"kp":1.2}' : '{}'
                         wrapMode: TextEdit.WrapAnywhere
                         font.family: "Consolas"
                         font.pixelSize: 10

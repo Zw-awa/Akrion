@@ -8,6 +8,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <QRandomGenerator>
 #include <QSerialPort>
 #include <QStringList>
 #include <QTimer>
@@ -21,6 +22,9 @@ class AppController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(WaveformController* waveform READ waveform CONSTANT)
     Q_PROPERTY(QStringList ports READ ports NOTIFY portsChanged)
+    Q_PROPERTY(QVariantList inputComponents READ inputComponents CONSTANT)
+    Q_PROPERTY(QVariantList noiseComponents READ noiseComponents CONSTANT)
+    Q_PROPERTY(QVariantList algorithmComponents READ algorithmComponents CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY sourceChanged)
     Q_PROPERTY(bool demo READ demo NOTIFY sourceChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
@@ -37,6 +41,9 @@ public:
 
     WaveformController* waveform() { return &m_waveform; }
     QStringList ports() const { return m_ports; }
+    QVariantList inputComponents() const;
+    QVariantList noiseComponents() const;
+    QVariantList algorithmComponents() const;
     bool connected() const { return m_serial.isOpen() || m_demoTimer.isActive(); }
     bool demo() const { return m_demoTimer.isActive(); }
     bool recording() const { return m_writer && m_writer->isActive(); }
@@ -49,7 +56,9 @@ public:
 
     Q_INVOKABLE void refreshPorts();
     Q_INVOKABLE bool connectSerial(const QString& portName, int baudRate);
-    Q_INVOKABLE void startDemo();
+    Q_INVOKABLE void startDemo(const QString& inputComponent = QStringLiteral("step"),
+                               const QString& noiseComponent = QStringLiteral("gaussian"),
+                               const QString& algorithmComponent = QStringLiteral("p_control"));
     Q_INVOKABLE void disconnectSource();
     Q_INVOKABLE bool startRecording(const QString& runName,
                                     const QString& deviceId,
@@ -111,6 +120,11 @@ private:
     quint64 m_framesSinceRateUpdate = 0;
     quint64 m_demoSequence = 0;
     quint64 m_hostEpochUs = 0;
+    QString m_demoInputComponent = QStringLiteral("step");
+    QString m_demoNoiseComponent = QStringLiteral("gaussian");
+    QString m_demoAlgorithmComponent = QStringLiteral("p_control");
+    QRandomGenerator64 m_demoRandom {1};
+    double m_demoState = 0.0;
 };
 
 } // namespace akrion::gui

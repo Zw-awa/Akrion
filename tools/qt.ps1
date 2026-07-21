@@ -95,6 +95,17 @@ $buildName = if ($useAgentSafe) { "qt-agent" } else { "qt-local" }
 $buildDir = Join-Path $repoRoot "build\$buildName"
 $cliExecutable = Join-Path $buildDir "akrion.exe"
 $guiExecutable = Join-Path $buildDir "akrion-gui.exe"
+if (-not $env:AKRION_STORE) {
+    if ($dotEnv.ContainsKey("AKRION_STORE") -and $dotEnv["AKRION_STORE"]) {
+        $configuredStore = $dotEnv["AKRION_STORE"]
+        if (-not [IO.Path]::IsPathRooted($configuredStore)) {
+            $configuredStore = Join-Path $repoRoot $configuredStore
+        }
+        $env:AKRION_STORE = [IO.Path]::GetFullPath($configuredStore)
+    } elseif ($useAgentSafe) {
+        $env:AKRION_STORE = Join-Path $buildDir "runs"
+    }
+}
 
 function Assert-Tool([string]$Path, [string]$Name) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "$Name was not found at $Path" }
@@ -104,7 +115,22 @@ function Set-QtEnvironment {
     Assert-Tool $cmakeExe "CMake"
     Assert-Tool (Join-Path $mingwBin "g++.exe") "Qt MinGW"
     Assert-Tool (Join-Path $qtBin "Qt6Core.dll") "Qt runtime"
-    $env:Path = "$mingwBin;$qtBin;$(Split-Path -Parent $cmakeExe);$env:Path"
+
+    $cleanPath = @($env:Path.Split([IO.Path]::PathSeparator) | Where-Object {
+        $entry = $_.Trim().Trim('"')
+        if (-not $entry) { return $false }
+        try {
+            -not (Test-Path -LiteralPath ([IO.Path]::Combine($entry, "Qt6Core.dll")) -ErrorAction SilentlyContinue) -and
+                -not (Test-Path -LiteralPath ([IO.Path]::Combine($entry, "Qt6Gui.dll")) -ErrorAction SilentlyContinue)
+        } catch {
+            $true
+        }
+    })
+    $env:Path = (@($qtBin, $mingwBin, (Split-Path -Parent $cmakeExe)) + $cleanPath) -join [IO.Path]::PathSeparator
+    $env:QT_PLUGIN_PATH = Join-Path $qtKit "plugins"
+    $env:QML_IMPORT_PATH = Join-Path $qtKit "qml"
+    $env:QML2_IMPORT_PATH = Join-Path $qtKit "qml"
+    $env:QT_QPA_PLATFORM_PLUGIN_PATH = Join-Path $qtKit "plugins\platforms"
 }
 
 function Configure-Qt {
@@ -171,10 +197,54 @@ function Smoke-TestQt {
 function Deploy-Qt {
     Set-QtEnvironment
     Assert-Built
-    if ($useAgentSafe) { Write-Output "[INFO] Deploy skipped in agent-safe mode; run with the Qt bin directory on PATH."; return }
     Assert-Tool $deployExe "windeployqt"
-    & $deployExe --qmldir (Join-Path $repoRoot "qml") $guiExecutable
+
+    if ($useAgentSafe) {
+        throw "Qt deployment is unavailable in the restricted agent environment. Run tools/qt.ps1 deploy from a normal PowerShell terminal."
+    }
+
+    $distRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "dist"))
+    $distDir = [IO.Path]::GetFullPath((Join-Path $distRoot "Akrion"))
+    $safePrefix = $distRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $distDir.StartsWith($safePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to deploy outside the repository dist directory: $distDir"
+    }
+    if (Test-Path -LiteralPath $distDir) {
+        Remove-Item -LiteralPath $distDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+    $distGui = Join-Path $distDir "akrion-gui.exe"
+    $distCli = Join-Path $distDir "akrion.exe"
+    Copy-Item -LiteralPath $guiExecutable -Destination $distGui -Force
+    Copy-Item -LiteralPath $cliExecutable -Destination $distCli -Force
+
+    & $deployExe --release --force --compiler-runtime --no-translations --qmldir (Join-Path $repoRoot "qml") --dir $distDir $distGui
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $qtConf = "[Paths]`r`nPrefix=.`r`nPlugins=plugins`r`nQmlImports=qml`r`n"
+    [IO.File]::WriteAllText((Join-Path $distDir "qt.conf"), $qtConf,
+                            (New-Object Text.UTF8Encoding($false)))
+    Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $distDir -Force
+    $thirdPartyNotice = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+    if (Test-Path -LiteralPath $thirdPartyNotice) {
+        Copy-Item -LiteralPath $thirdPartyNotice -Destination $distDir -Force
+    }
+
+    $requiredFiles = @(
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Qml.dll",
+        "Qt6Quick.dll",
+        "Qt6QuickControls2.dll",
+        "Qt6SerialPort.dll",
+        "platforms\qwindows.dll"
+    )
+    foreach ($relativePath in $requiredFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $distDir $relativePath))) {
+            throw "Deployment is incomplete: $relativePath was not produced."
+        }
+    }
+    Write-Output "[INFO] Standalone application: $distGui"
 }
 
 function Clean-Qt {

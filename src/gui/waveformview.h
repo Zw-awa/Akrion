@@ -21,7 +21,7 @@ public:
     WaveformController* controller() const { return m_controller; }
     void setController(WaveformController* controller);
 
-    qreal leftInset() const { return 58.0; }
+    qreal leftInset() const { return 76.0; }
     qreal rightInset() const { return 12.0; }
     qreal topInset() const { return 10.0; }
     qreal bottomInset() const { return 24.0; }
@@ -40,12 +40,21 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    enum class DragMode {
+        None,
+        Both,
+        Vertical,
+    };
+
     QRectF plotRect() const;
     double normalizedX(qreal x) const;
+    QString groupAtY(qreal y, double* normalizedPosition, qreal* groupHeight = nullptr) const;
 
     QPointer<WaveformController> m_controller;
     QPointF m_lastDragPosition;
-    bool m_dragging = false;
+    QString m_dragGroupKey;
+    qreal m_dragGroupHeight = 1.0;
+    DragMode m_dragMode = DragMode::None;
 };
 
 } // namespace akrion::gui

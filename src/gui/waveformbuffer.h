@@ -99,6 +99,7 @@ public:
 
     void setCapacity(int capacity);
     void clear();
+    void resetChannels();
 
     int ensureChannel(const WaveformChannel& channel);
     bool updateChannel(int index, const WaveformChannel& channel);
@@ -117,6 +118,7 @@ public:
         const QVector<int>& channelIndices,
         bool includeDisabledSamples) const;
     WaveformCursorSample nearest(WaveformTimeAxis axis, qint64 timeUs) const;
+    QVector<WaveformCursorSample> nearby(WaveformTimeAxis axis, qint64 timeUs, int radius = 4) const;
 
 private:
     struct ChannelStorage {
@@ -129,6 +131,7 @@ private:
     qint64 timeAt(int logicalIndex, WaveformTimeAxis axis) const;
     int lowerBound(qint64 timeUs, WaveformTimeAxis axis) const;
     int upperBound(qint64 timeUs, WaveformTimeAxis axis) const;
+    WaveformCursorSample sampleAt(int logicalIndex, WaveformTimeAxis axis) const;
     int channelIndexForKey(const QString& key) const;
 
     mutable QReadWriteLock m_lock;

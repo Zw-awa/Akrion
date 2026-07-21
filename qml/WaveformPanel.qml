@@ -10,11 +10,25 @@ Item {
     property var activeGroups: controller ? controller.groupInfo.filter(function(group) {
         return group.visibleChannels > 0
     }) : []
+    property var timeTickModel: {
+        if (!controller) return []
+        controller.viewStartUs
+        controller.viewEndUs
+        const plotWidth = Math.max(1, waveformView.width - waveformView.leftInset - waveformView.rightInset)
+        const maximumTicks = Math.max(4, Math.min(10, Math.floor(plotWidth / 90) + 1))
+        return controller.timeTicks(maximumTicks)
+    }
 
     function timeText(timeUs) {
         if (!controller) return "--"
         if (controller.timeAxis === "host") return Qt.formatTime(new Date(Number(timeUs) / 1000), "HH:mm:ss.zzz")
-        return (Number(timeUs) / 1000000).toFixed(3) + " s"
+        const spanSeconds = Math.abs(Number(controller.viewEndUs - controller.viewStartUs)) / 1000000
+        const decimals = spanSeconds >= 20 ? 0
+                       : spanSeconds >= 2 ? 1
+                       : spanSeconds >= 0.2 ? 2
+                       : spanSeconds >= 0.02 ? 3
+                       : spanSeconds >= 0.002 ? 4 : 6
+        return (Number(timeUs) / 1000000).toFixed(decimals) + " s"
     }
 
     ColumnLayout {
@@ -83,7 +97,17 @@ Item {
                     enabled: !controller.follow || controller.paused
                     onClicked: controller.follow = true
                     ToolTip.visible: hovered
-                    ToolTip.text: "回到最新数据；也可双击波形"
+                    ToolTip.text: "回到最新数据"
+                }
+                ToolButton {
+                    text: "适应 Y"
+                    enabled: root.activeGroups.length > 0
+                    onClicked: {
+                        for (let index = 0; index < root.activeGroups.length; ++index)
+                            controller.resetGroupRange(root.activeGroups[index].key)
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: "按已有数据重置所有 Y 轴"
                 }
                 ToolButton {
                     text: channelPane.visible ? "隐藏通道" : "通道"
@@ -122,32 +146,82 @@ Item {
 
                         x: 4
                         y: waveformView.topInset + index * groupSlotHeight
-                        width: waveformView.leftInset - 8
+                        width: waveformView.leftInset - 10
                         height: groupSlotHeight - 8
                         property real groupSlotHeight: (waveformView.height - waveformView.topInset - waveformView.bottomInset + 8)
                                                        / Math.max(1, root.activeGroups.length)
+                        property var tickModel: root.controller.valueTicks(Number(modelData.minimum),
+                                                                           Number(modelData.maximum), 6)
+
+                        Repeater {
+                            model: parent.tickModel
+                            delegate: Label {
+                                required property var modelData
+                                x: 0
+                                y: Number(modelData.position) * parent.height - height / 2
+                                width: parent.width
+                                text: modelData.label
+                                horizontalAlignment: Text.AlignRight
+                                color: "#68707c"
+                                font.family: "Consolas"
+                                font.pixelSize: 9
+                            }
+                        }
 
                         Label {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.unit ? modelData.label + "\n[" + modelData.unit + "]" : modelData.label
-                            horizontalAlignment: Text.AlignRight
-                            wrapMode: Text.Wrap
-                            color: "#57606a"
-                            font.pixelSize: 10
+                            x: parent.width + 12
+                            y: 4
+                            text: modelData.unit ? modelData.label + " [" + modelData.unit + "]" : modelData.label
+                            color: "#68707c"
+                            font.pixelSize: 9
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            cursorShape: Qt.SizeVerCursor
+                            preventStealing: true
+                            property real previousY: 0
+
+                            onPressed: function(mouse) {
+                                previousY = mouse.y
+                            }
+                            onPositionChanged: function(mouse) {
+                                if (!pressed || height <= 0) return
+                                const delta = mouse.y - previousY
+                                previousY = mouse.y
+                                if (delta !== 0)
+                                    root.controller.panGroupBy(modelData.key, delta / height)
+                            }
+                            onWheel: function(wheel) {
+                                const steps = wheel.angleDelta.y / 120
+                                if (steps !== 0)
+                                    root.controller.zoomGroupAt(modelData.key,
+                                                                Math.max(0, Math.min(1, wheel.y / height)),
+                                                                Math.pow(1.25, steps))
+                                wheel.accepted = true
+                            }
+                            onDoubleClicked: function(mouse) {
+                                root.controller.resetGroupRange(modelData.key)
+                                mouse.accepted = true
+                            }
                         }
                     }
                 }
 
                 Repeater {
-                    model: 7
+                    model: root.timeTickModel
                     delegate: Label {
-                        required property int index
-                        x: waveformView.leftInset + (waveformView.width - waveformView.leftInset - waveformView.rightInset) * index / 6 - width / 2
+                        required property var modelData
+                        x: Math.max(waveformView.leftInset,
+                                    Math.min(waveformView.width - waveformView.rightInset - width,
+                                             waveformView.leftInset
+                                             + (waveformView.width - waveformView.leftInset - waveformView.rightInset)
+                                             * Number(modelData.position) - width / 2))
                         y: waveformView.height - waveformView.bottomInset + 4
-                        text: root.timeText(controller.viewStartUs + (controller.viewEndUs - controller.viewStartUs) * index / 6)
+                        text: root.timeText(modelData.timeUs)
                         color: "#68707c"
+                        font.family: "Consolas"
                         font.pixelSize: 9
                     }
                 }
@@ -177,6 +251,7 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: controller.cursorTimeLabel
+                                  + (controller.cursorSnapped ? " · " + controller.cursorSnapLabel : "")
                             elide: Text.ElideRight
                             color: "#57606a"
                             font.pixelSize: 9
@@ -249,7 +324,7 @@ Item {
                         spacing: 0
 
                         Label {
-                            text: "通道"
+                            text: "通道  " + controller.channelCount
                             font.bold: true
                             Layout.leftMargin: 12
                             Layout.topMargin: 12
@@ -265,9 +340,11 @@ Item {
                                 required property string groupKey
                                 required property color channelColor
                                 required property bool channelVisible
+                                required property var latestValue
+                                required property bool hasValue
 
                                 Layout.fillWidth: true
-                                implicitHeight: 64
+                                implicitHeight: 70
                                 color: "transparent"
 
                                 ColumnLayout {
@@ -281,15 +358,94 @@ Item {
                                         spacing: 5
 
                                         Rectangle {
-                                            implicitWidth: 9
-                                            implicitHeight: 9
+                                            id: colorSwatch
+                                            implicitWidth: 16
+                                            implicitHeight: 16
                                             color: channelColor
+                                            border.color: "#8c959f"
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: colorPopup.open()
+                                            }
+                                            Popup {
+                                                id: colorPopup
+                                                y: colorSwatch.height + 4
+                                                padding: 7
+                                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                                                background: Rectangle {
+                                                    color: "#ffffff"
+                                                    border.color: "#afb8c1"
+                                                    radius: 4
+                                                }
+                                                ColumnLayout {
+                                                    spacing: 6
+                                                    Grid {
+                                                        columns: 4
+                                                        spacing: 6
+                                                        Repeater {
+                                                            model: ["#0969da", "#cf222e", "#1a7f37", "#8250df",
+                                                                    "#bf8700", "#00838f", "#d15704", "#57606a",
+                                                                    "#e83e8c", "#24292f", "#00a6a6", "#6f42c1"]
+                                                            delegate: Rectangle {
+                                                                required property string modelData
+                                                                width: 20
+                                                                height: 20
+                                                                color: modelData
+                                                                border.width: channelColor.toString() === modelData ? 2 : 1
+                                                                border.color: channelColor.toString() === modelData ? "#24292f" : "#d0d7de"
+                                                                MouseArea {
+                                                                    anchors.fill: parent
+                                                                    cursorShape: Qt.PointingHandCursor
+                                                                    onClicked: {
+                                                                        controller.setChannelColor(key, modelData)
+                                                                        colorPopup.close()
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    RowLayout {
+                                                        TextField {
+                                                            id: customColor
+                                                            implicitWidth: 78
+                                                            implicitHeight: 25
+                                                            text: channelColor.toString()
+                                                            selectByMouse: true
+                                                        }
+                                                        Button {
+                                                            text: "应用"
+                                                            implicitHeight: 25
+                                                            onClicked: {
+                                                                controller.setChannelColor(key, customColor.text)
+                                                                colorPopup.close()
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                         CheckBox {
-                                            text: label + (unit ? " [" + unit + "]" : "")
+                                            text: ""
                                             checked: channelVisible
-                                            Layout.fillWidth: true
                                             onToggled: controller.setChannelVisible(key, checked)
+                                        }
+                                        TextField {
+                                            Layout.fillWidth: true
+                                            implicitHeight: 26
+                                            text: label
+                                            selectByMouse: true
+                                            onEditingFinished: controller.setChannelLabel(key, text)
+                                        }
+                                        Label {
+                                            text: hasValue
+                                                  ? Number(latestValue).toPrecision(7) + (unit ? " " + unit : "")
+                                                  : "--"
+                                            horizontalAlignment: Text.AlignRight
+                                            font.family: "Consolas"
+                                            font.pixelSize: 10
+                                            Layout.minimumWidth: 72
                                         }
                                     }
                                     ComboBox {
@@ -335,9 +491,15 @@ Item {
                                         Layout.fillWidth: true
                                     }
                                     CheckBox {
-                                        text: "自动"
+                                        text: "自动扩展"
                                         checked: modelData.autoRange
                                         onToggled: controller.setGroupAutoRange(modelData.key, checked)
+                                    }
+                                    ToolButton {
+                                        text: "适应"
+                                        onClicked: controller.resetGroupRange(modelData.key)
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "按已有数据重置此 Y 轴"
                                     }
                                 }
                                 RowLayout {
@@ -399,9 +561,6 @@ Item {
                     font.pixelSize: 10
                 }
                 Label {
-                    text: "滚轮缩放 · 拖拽平移 · 双击恢复跟随"
-                    color: "#68707c"
-                    font.pixelSize: 10
                     Layout.fillWidth: true
                 }
                 Label {

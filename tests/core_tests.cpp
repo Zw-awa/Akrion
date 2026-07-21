@@ -424,6 +424,19 @@ void testCaptureSessionDemo() {
           QStringLiteral("captured frame order and host timestamps persist"));
 }
 
+void testRunStoreEnvironmentOverride() {
+    const QByteArray previous = qgetenv("AKRION_STORE");
+    const QString configured = QDir(QDir::tempPath()).filePath(QStringLiteral("akrion-env-store"));
+    qputenv("AKRION_STORE", configured.toUtf8());
+    check(RunStore::defaultRoot() == QDir(configured).absolutePath(),
+          QStringLiteral("AKRION_STORE overrides the default run location"));
+    if (previous.isNull()) {
+        qunsetenv("AKRION_STORE");
+    } else {
+        qputenv("AKRION_STORE", previous);
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -432,6 +445,7 @@ int main(int argc, char* argv[]) {
     testCanonicalSignatures();
     testRunStorageAndRepair();
     testCaptureSessionDemo();
+    testRunStoreEnvironmentOverride();
     if (failures == 0) {
         std::cout << "All core tests passed\n";
     }

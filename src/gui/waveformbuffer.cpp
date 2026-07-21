@@ -106,6 +106,21 @@ void WaveformBuffer::clear() {
     for (auto& channel : m_channels) channel.valid.fill(false);
 }
 
+void WaveformBuffer::resetChannels() {
+    QWriteLocker locker(&m_lock);
+    m_count = 0;
+    m_head = 0;
+    m_events.clear();
+    m_channels.clear();
+    m_totalFrames = 0;
+    m_droppedFrames = 0;
+    m_lastSequence = 0;
+    m_hasLastSequence = false;
+    m_deviceTimeMonotonic = true;
+    m_hostTimeMonotonic = true;
+    m_algorithmEnabled.fill(false);
+}
+
 int WaveformBuffer::ensureChannel(const WaveformChannel& channel) {
     if (channel.key.isEmpty()) return -1;
     QWriteLocker locker(&m_lock);
@@ -318,6 +333,43 @@ WaveformCursorSample WaveformBuffer::nearest(WaveformTimeAxis axis, qint64 timeU
         }
     }
 
+    return sampleAt(logical, axis);
+}
+
+QVector<WaveformCursorSample> WaveformBuffer::nearby(
+    WaveformTimeAxis axis,
+    qint64 timeUs,
+    int radius) const {
+    QReadLocker locker(&m_lock);
+    QVector<WaveformCursorSample> result;
+    if (m_count == 0) return result;
+    radius = qBound(1, radius, 32);
+
+    const bool monotonic = axis == WaveformTimeAxis::Device ? m_deviceTimeMonotonic : m_hostTimeMonotonic;
+    int center = 0;
+    if (monotonic) {
+        center = qMin(m_count - 1, lowerBound(timeUs, axis));
+    } else {
+        qint64 bestDistance = qAbs(timeAt(0, axis) - timeUs);
+        for (int candidate = 1; candidate < m_count; ++candidate) {
+            const qint64 distance = qAbs(timeAt(candidate, axis) - timeUs);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                center = candidate;
+            }
+        }
+    }
+
+    const int first = qMax(0, center - radius);
+    const int last = qMin(m_count - 1, center + radius);
+    result.reserve(last - first + 1);
+    for (int logical = first; logical <= last; ++logical) result.append(sampleAt(logical, axis));
+    return result;
+}
+
+WaveformCursorSample WaveformBuffer::sampleAt(int logical, WaveformTimeAxis axis) const {
+    WaveformCursorSample result;
+    if (logical < 0 || logical >= m_count) return result;
     const int physical = physicalIndex(logical);
     result.valid = true;
     result.timeUs = timeAt(logical, axis);

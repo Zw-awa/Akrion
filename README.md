@@ -126,6 +126,8 @@ Build both applications, verify the environment, and record a short deterministi
 
 The current implementation provides a shared typed C++ core, a complete recording CLI, and a Qt/QML desktop waveform application.
 
+The desktop application is intended for real-device debugging: connect a serial source to watch target, actual, and control signals live, pause and inspect the plot, then replay the same run after capture. The CLI handles repeatable recording, validation, and export; the GUI is for hands-on observation.
+
 The CLI includes:
 
 - `doctor`, `ports`, `init`, `record`, and `demo`
@@ -147,7 +149,14 @@ Install Qt 6.5 or newer with `Core`, `Gui`, `Qml`, `Quick`, `QuickControls2`, an
 .\tools\qt.ps1 cli runs list --json
 ```
 
-The unified entry point resolves Qt from command-line arguments, environment variables, `.env`, then automatic discovery, and pins CMake, MinGW, and `MinGW Makefiles` from that installation. For local configuration, copy `.env.example` to `.env` and set `QT_ROOT` and `QT_VERSION`; `.env` is ignored by Git. Codex environments automatically use the agent-safe CMake branch, while normal terminals retain standard `qt_add_qml_module` builds.
+Use `run` during development. To create a self-contained Windows application directory with the Qt runtime included:
+
+```powershell
+.\tools\qt.ps1 deploy
+.\dist\Akrion\akrion-gui.exe
+```
+
+The unified entry point resolves Qt from command-line arguments, environment variables, `.env`, then automatic discovery, and pins CMake, MinGW, and `MinGW Makefiles` from that installation. It also isolates the selected Qt runtime from copies bundled with other software. For local configuration, copy `.env.example` to `.env` and set `QT_ROOT` and `QT_VERSION`; `.env` is ignored by Git. Codex environments automatically use the agent-safe CMake branch, while normal terminals retain standard `qt_add_qml_module` builds.
 
 ### Serial Protocol
 
